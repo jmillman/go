@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"tickets"
 	"time"
 	"user"
@@ -37,7 +36,7 @@ func validateBet(r *http.Request) (response tickets.CreateTicketResponse) {
 	r.ParseForm()
 	response.Status = true
 	quantity, errQuantity := strconv.ParseInt(r.FormValue("quantity"), 10, 0)
-	price, errPrice := strconv.ParseFloat(r.FormValue("price"), 10)
+	price, errPrice := strconv.ParseInt(r.FormValue("price"), 10, 0)
 	if r.FormValue("ticket") == "" {
 		response.Status = false
 		response.Message = "ticket missing"
@@ -65,9 +64,9 @@ func validateBet(r *http.Request) (response tickets.CreateTicketResponse) {
 	} else if quantity > 10 || quantity < 1 {
 		response.Status = false
 		response.Message = "quantity must be between 1 and 10"
-	} else if price > 10 || price < 0 {
+	} else if price > 100 || price < 0 {
 		response.Status = false
-		response.Message = "price must be between 1 and 10"
+		response.Message = "price must be between 1 and 100"
 	}
 	return response
 }
@@ -135,13 +134,9 @@ func main() {
 	http.HandleFunc("/createticket", func(w http.ResponseWriter, r *http.Request) {
 		response := validateBet(r)
 		if response.Status == true {
-			padLength := 4
-			priceParts := strings.Split(r.FormValue("price"), ".")
-			price := strings.Repeat("0", padLength-len(priceParts[0])) + priceParts[0] + "." + priceParts[1] + strings.Repeat("0", padLength-len(priceParts[1]))
-
 			quantity, _ := strconv.ParseInt(r.FormValue("quantity"), 10, 0)
 			for j := int(1); j <= int(quantity); j++ {
-				priceAndTimeAndQuantity := fmt.Sprintf("%v_%v_%v_%vOF%v", r.FormValue("side"), price, time.Now().UTC().String(), j, quantity)
+				priceAndTimeAndQuantity := fmt.Sprintf("%v_%v_%v_%vOF%v", r.FormValue("side"), r.FormValue("price"), time.Now().UTC().String(), j, quantity)
 				response = tickets.CreateTicket(priceAndTimeAndQuantity, r.FormValue("ticket"), r.FormValue("betType"), r.FormValue("side"), r.FormValue("price"), r.FormValue("userId"))
 			}
 		}
