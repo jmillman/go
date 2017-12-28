@@ -1,6 +1,8 @@
 package main
 
 import (
+	"apblogger"
+	"bets"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,14 +12,6 @@ import (
 	"time"
 	"user"
 )
-
-type myHandler struct {
-	greeting string
-}
-
-func (mh myHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte(fmt.Sprintf("%v", mh.greeting)))
-}
 
 func validateUser(r *http.Request) (response user.UserResponse) {
 	r.ParseForm()
@@ -71,6 +65,19 @@ func validateBet(r *http.Request) (response tickets.CreateTicketResponse) {
 	return response
 }
 
+// APIErrorResponse is for sending error messages back to the client
+type APIErrorResponse struct {
+	Error   bool   `json:"error"`
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+}
+
+func respondWithError(w http.ResponseWriter, errorMessage string) {
+	response := APIErrorResponse{Error: true, Message: errorMessage}
+	enc := json.NewEncoder(w)
+	enc.Encode(response)
+}
+
 func main() {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -84,38 +91,17 @@ func main() {
 		http.ServeFile(w, r, filePath)
 	})
 
-	http.HandleFunc("/validateuser", func(w http.ResponseWriter, r *http.Request) {
-		response := validateUser(r)
-		enc := json.NewEncoder(w)
-		enc.Encode(response)
-	})
+	// http.HandleFunc("/validateuser", func(w http.ResponseWriter, r *http.Request) {
+	// 	response := validateUser(r)
+	// 	enc := json.NewEncoder(w)
+	// 	enc.Encode(response)
+	// })
 
 	http.HandleFunc("/loginuser", func(w http.ResponseWriter, r *http.Request) {
 		response := validateUser(r)
 		if response.Status == true {
 			response = user.LoginUser(r.FormValue("email"), r.FormValue("password"))
 		}
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		enc := json.NewEncoder(w)
-		enc.Encode(response)
-	})
-
-	http.HandleFunc("/getuser", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
-		response := user.GetUser(r.FormValue("email"))
-		enc := json.NewEncoder(w)
-		enc.Encode(response)
-	})
-
-	http.HandleFunc("/getallusers", func(w http.ResponseWriter, r *http.Request) {
-		response := user.GetAllUsers()
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		enc := json.NewEncoder(w)
-		enc.Encode(response)
-	})
-
-	http.HandleFunc("/getalltickets", func(w http.ResponseWriter, r *http.Request) {
-		response := tickets.GetAllTickets()
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		enc := json.NewEncoder(w)
 		enc.Encode(response)
@@ -131,18 +117,198 @@ func main() {
 		enc.Encode(response)
 	})
 
-	http.HandleFunc("/createticket", func(w http.ResponseWriter, r *http.Request) {
-		response := validateBet(r)
-		if response.Status == true {
-			quantity, _ := strconv.ParseInt(r.FormValue("quantity"), 10, 0)
-			for j := int(1); j <= int(quantity); j++ {
-				priceAndTimeAndQuantity := fmt.Sprintf("%v_%v_%v_%vOF%v", r.FormValue("side"), r.FormValue("price"), time.Now().UTC().String(), j, quantity)
-				response = tickets.CreateTicket(priceAndTimeAndQuantity, r.FormValue("ticket"), r.FormValue("betType"), r.FormValue("side"), r.FormValue("price"), r.FormValue("userId"))
-			}
-		}
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.HandleFunc("/getuser", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		response := user.GetUser(r.FormValue("email"))
+
+		fmt.Printf("getuser_____________\n")
+		fmt.Printf("%v\n", response)
+
 		enc := json.NewEncoder(w)
 		enc.Encode(response)
+	})
+
+	http.HandleFunc("/getallusers", func(w http.ResponseWriter, r *http.Request) {
+		response := user.GetAllUsers()
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if response == nil {
+			respondWithError(w, "No users")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/createticket", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		response := validateBet(r)
+		if response.Status != true {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		} else {
+			quantity, _ := strconv.ParseInt(r.FormValue("quantity"), 10, 0)
+			// TODO: don't hardcode the max Value
+			price, _ := strconv.ParseInt(r.FormValue("price"), 10, 0)
+			sortKeyPrice := 100 - price //need to sort by largest number and dynamodb sorts by smallest so have to take invese, should be max - price, hard coded in 100
+			for j := int(1); j <= int(quantity); j++ {
+				sortKey := fmt.Sprintf("%v_%v_%vOF%v", sortKeyPrice, time.Now().UnixNano(), j, quantity)
+				_, err := tickets.CreateTicket(sortKey, r.FormValue("ticket"), r.FormValue("betType"), r.FormValue("side"), r.FormValue("price"), r.FormValue("userId"))
+				if err != nil {
+					respondWithError(w, err.Error())
+					return
+				}
+			}
+			enc := json.NewEncoder(w)
+			enc.Encode(APIErrorResponse{Error: false, Message: "Tickets Created"})
+		}
+	})
+
+	http.HandleFunc("/getticket", func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		response, err := tickets.GetTicket(r.FormValue("ticket"), r.FormValue("priceAndTime"))
+
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else if response.Ticket == "" {
+			respondWithError(w, "Ticket not found")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/getalltickets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		response, err := tickets.GetAllTickets()
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else if len(response) == 0 {
+			respondWithError(w, "No tickets found.")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/getticketcommon", func(w http.ResponseWriter, r *http.Request) {
+		apblogger.LogForm("getticketcommon", r)
+
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		response, err := tickets.GetTicketCommon(r.FormValue("ticket"))
+
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else if len(response) == 0 {
+			respondWithError(w, "No tickets found.")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/getticketoppose", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		ticket := r.FormValue("ticket")
+
+		response, err := tickets.GetTicketOppose(ticket)
+
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else if len(response) == 0 {
+			respondWithError(w, "No tickets found.")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	type BetResponse struct {
+		Ticket  tickets.TicketObj `json:"ticket"`
+		Oppose  tickets.TicketObj `json:"opposet"`
+		Status  bool              `json:"status"`
+		Message string            `json:"message"`
+	}
+	http.HandleFunc("/getbet", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		ticket, err := tickets.GetTicket(r.FormValue("ticket"), r.FormValue("priceAndTime"))
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else {
+			if ticket.Ticket != "" {
+				// ticket found
+				ticketsJSON, _ := json.Marshal(ticket)
+				ticketsOppose, err := tickets.GetTicketOppose(ticket.Ticket)
+				ticketOpposeTop := ticketsOppose[0]
+				if err != nil {
+					respondWithError(w, err.Error())
+				} else {
+					ticketPrice, err := strconv.ParseInt(ticket.Price, 10, 0)
+					ticketPriceOppose, err := strconv.ParseInt(ticketOpposeTop.Price, 10, 0)
+					maxPrice, err := strconv.ParseInt("100", 10, 0)
+					if err != nil {
+						respondWithError(w, err.Error())
+					}
+
+					if len(ticketsOppose) > 0 && (ticketPrice >= (100 - ticketPriceOppose)) {
+						if maxPrice-ticketPrice-ticketPriceOppose > 0 {
+							respondWithError(w, "The prices didn't equal")
+						} else {
+							overPaid, err := strconv.ParseInt("0", 10, 0)
+							if maxPrice != ticketPrice+ticketPriceOppose {
+								overPaid = maxPrice - ticketPrice - ticketPriceOppose
+							}
+							apblogger.LogVar("overPaid", fmt.Sprintf("%v", overPaid))
+							ticketPriceAdjusted := ticketPrice + (overPaid / 2)
+							ticketPriceOpposeAdjusted := maxPrice - ticketPriceAdjusted
+							ticketToWrite := ticket
+							ticketToWriteOpposeTop := ticketOpposeTop
+
+							ticketToWrite.PriceAdjusted = fmt.Sprintf("%v", ticketPriceAdjusted)
+							ticketToWriteOpposeTop.PriceAdjusted = fmt.Sprintf("%v", ticketPriceOpposeAdjusted)
+							apblogger.LogVar("ticketToWrite.Price >> NEW >>", fmt.Sprintf("%v", ticketToWrite.Price))
+							apblogger.LogVar("ticketToWriteOpposeTop.Price >> NEW >>", fmt.Sprintf("%v", ticketToWriteOpposeTop.Price))
+
+							apblogger.LogVar("ticketToWrite", fmt.Sprintf("%v", ticketToWrite))
+							apblogger.LogVar("ticketToWriteOpposeTop", fmt.Sprintf("%v", ticketToWriteOpposeTop))
+
+							history := BetResponse{Ticket: ticketToWrite, Oppose: ticketToWriteOpposeTop}
+							historyJSON, _ := json.Marshal(history)
+							timestamp := fmt.Sprintf("%v", time.Now().UnixNano())
+
+							response, err := bets.CreateBet(ticket.Ticket, timestamp, ticket.BetType, ticket.UserId, ticketOpposeTop.UserId, string(historyJSON))
+							if err != nil {
+								respondWithError(w, err.Error())
+							}
+							enc := json.NewEncoder(w)
+							enc.Encode(response)
+						}
+					} else {
+						apblogger.LogVar("Match Not Found", string(ticketsJSON))
+						respondWithError(w, "Match not found")
+					}
+				}
+			}
+
+		}
+	})
+
+	http.HandleFunc("/getallbets", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		response, err := bets.GetAllBets()
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else if len(response) == 0 {
+			respondWithError(w, "No bets found.")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
 	})
 
 	http.ListenAndServe(":4444", nil)
