@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
@@ -129,4 +130,64 @@ func PutUser(email string, password string) (response UserResponse) {
 	}
 
 	return response
+}
+
+// UpdateUserResponse object to be returned from the update user call
+type UpdateUserResponse struct {
+	Error   bool   `json:"error"`
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+}
+
+// UpdateUser updates a user in the database
+func UpdateUser(email string, bankroll string) (updateUserResponse UpdateUserResponse, err error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-2")},
+	)
+
+	svc := dynamodb.New(sess)
+
+	input := &dynamodb.UpdateItemInput{
+		ExpressionAttributeNames: map[string]*string{
+			"#BR": aws.String("bankroll"),
+		},
+		ExpressionAttributeValues: map[string]*dynamodb.AttributeValue{
+			":br": {
+				N: aws.String(bankroll),
+			},
+		},
+		Key: map[string]*dynamodb.AttributeValue{
+			"email": {
+				S: aws.String(email),
+			},
+		},
+		ConditionExpression: aws.String("attribute_exists(email)"), //this is because if it has email it exists, if not it would be a new record and dynamo will just enter it
+		ReturnValues:        aws.String("ALL_NEW"),
+		TableName:           aws.String("Users"),
+		UpdateExpression:    aws.String("SET #BR = :br"),
+	}
+
+	_, err = svc.UpdateItem(input)
+
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case dynamodb.ErrCodeConditionalCheckFailedException:
+				updateUserResponse.Error = true
+				updateUserResponse.Message = "Item does not exist"
+				fmt.Println(dynamodb.ErrCodeConditionalCheckFailedException, aerr.Error())
+				return updateUserResponse, err
+			default:
+				fmt.Println(aerr.Error())
+				return updateUserResponse, aerr
+			}
+		} else {
+			fmt.Println(err.Error())
+		}
+
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+	}
+	return updateUserResponse, err
 }

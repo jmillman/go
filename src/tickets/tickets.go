@@ -1,6 +1,7 @@
 package tickets
 
 import (
+	"apblogger"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,21 +13,64 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 )
 
+// CreateTicketResponse response for the create ticket api
 type CreateTicketResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
 }
 
+// TicketObj object for the ticket
 type TicketObj struct {
 	Ticket        string `json:"ticket"`
 	BetType       string `json:"betType"`
 	Side          string `json:"side"`
 	Price         string `json:"price"`
 	PriceAdjusted string `json:"priceAdjusted"`
-	UserId        string `json:"userId"`
+	UserID        string `json:"userId"`
 	PriceAndTime  string `json:"priceAndTime"`
 }
 
+// DeleteTicket deletes ticket from DB
+func DeleteTicket(ticket string, priceAndTime string) (err error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-2")},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	svc := dynamodb.New(sess)
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String("tickets"),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ticket": {
+				S: aws.String(ticket),
+			},
+			"priceAndTime": {
+				S: aws.String(priceAndTime),
+			},
+		},
+	}
+
+	result, err := svc.DeleteItem(input)
+
+	apblogger.LogMessage("_________delete____________")
+	apblogger.LogVar("result", fmt.Sprintf("%v\n", result))
+	apblogger.LogVar("err", fmt.Sprintf("%v\n", err))
+
+	return err
+
+	// err = dynamodbattribute.UnmarshalMap(result.Item, &retTicket)
+	//
+	// if err != nil {
+	// 	return retTicket, err
+	// 	// panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
+	// }
+	// return retTicket, nil
+}
+
+// GetTicket gets the ticket from the db
 func GetTicket(ticket string, priceAndTime string) (retTicket TicketObj, err error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
@@ -37,8 +81,7 @@ func GetTicket(ticket string, priceAndTime string) (retTicket TicketObj, err err
 	}
 
 	svc := dynamodb.New(sess)
-
-	result, err := svc.GetItem(&dynamodb.GetItemInput{
+	input := &dynamodb.GetItemInput{
 		TableName: aws.String("tickets"),
 		Key: map[string]*dynamodb.AttributeValue{
 			"ticket": {
@@ -48,7 +91,9 @@ func GetTicket(ticket string, priceAndTime string) (retTicket TicketObj, err err
 				S: aws.String(priceAndTime),
 			},
 		},
-	})
+	}
+
+	result, err := svc.GetItem(input)
 
 	if err != nil {
 		return retTicket, err
@@ -63,6 +108,7 @@ func GetTicket(ticket string, priceAndTime string) (retTicket TicketObj, err err
 	return retTicket, nil
 }
 
+// GetTicketOppose gets the away for a call and the call for an away
 func GetTicketOppose(ticket string) (retTickets []TicketObj, err error) {
 	hasSide := false
 	if strings.Contains(ticket, "_home") {
@@ -74,11 +120,12 @@ func GetTicketOppose(ticket string) (retTickets []TicketObj, err error) {
 	}
 	if !hasSide {
 		return retTickets, errors.New("Ticket has no side")
-	} else {
-		return GetTicketCommon(ticket)
 	}
+
+	return GetTicketCommon(ticket)
 }
 
+// GetTicketCommon gets all the same tickets, meaning all the same home or aways
 func GetTicketCommon(ticket string) (retTickets []TicketObj, err error) {
 
 	sess, err := session.NewSession(&aws.Config{
@@ -121,6 +168,7 @@ func GetTicketCommon(ticket string) (retTickets []TicketObj, err error) {
 	return retTickets, nil
 }
 
+// GetAllTickets gets all tickets from the database
 func GetAllTickets() (retTickets []TicketObj, err error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
@@ -168,7 +216,8 @@ func GetAllTickets() (retTickets []TicketObj, err error) {
 	return retTickets, nil
 }
 
-func CreateTicket(priceAndTime string, ticketString string, betType string, side string, price string, userId string) (response CreateTicketResponse, err error) {
+// CreateTicket creates a ticket
+func CreateTicket(priceAndTime string, ticketString string, betType string, side string, price string, userID string) (response CreateTicketResponse, err error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -176,7 +225,7 @@ func CreateTicket(priceAndTime string, ticketString string, betType string, side
 		return response, err
 	}
 	svc := dynamodb.New(sess)
-	ticket := &TicketObj{PriceAndTime: priceAndTime, Ticket: ticketString, BetType: betType, Side: side, Price: price, UserId: userId}
+	ticket := &TicketObj{PriceAndTime: priceAndTime, Ticket: ticketString, BetType: betType, Side: side, Price: price, UserID: userID}
 	atts, err := dynamodbattribute.MarshalMap(ticket)
 
 	if err != nil {

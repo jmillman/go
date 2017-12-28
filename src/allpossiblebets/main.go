@@ -65,6 +65,19 @@ func validateBet(r *http.Request) (response tickets.CreateTicketResponse) {
 	return response
 }
 
+func validateDeleteTicket(r *http.Request) (response tickets.CreateTicketResponse) {
+	r.ParseForm()
+	response.Status = true
+	if r.FormValue("ticket") == "" {
+		response.Status = false
+		response.Message = "ticket missing"
+	} else if r.FormValue("priceAndTime") == "" {
+		response.Status = false
+		response.Message = "priceAndTime missing"
+	}
+	return response
+}
+
 // APIErrorResponse is for sending error messages back to the client
 type APIErrorResponse struct {
 	Error   bool   `json:"error"`
@@ -232,6 +245,38 @@ func main() {
 		Status  bool              `json:"status"`
 		Message string            `json:"message"`
 	}
+
+	http.HandleFunc("/deleteticket", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		response := validateDeleteTicket(r)
+
+		if response.Status != true {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		} else {
+			err := tickets.DeleteTicket(r.FormValue("ticket"), r.FormValue("priceAndTime"))
+			if err != nil {
+				respondWithError(w, err.Error())
+			} else {
+				respondWithError(w, "DELETE WORKED")
+			}
+		}
+	})
+
+	http.HandleFunc("/updateuser", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		response, err := user.UpdateUser(r.FormValue("email"), r.FormValue("bankroll"))
+		apblogger.LogMessage("updateuser")
+		apblogger.LogVar("response", fmt.Sprintf("%v", response))
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else {
+			respondWithError(w, "Update Worked")
+		}
+	})
+
 	http.HandleFunc("/getbet", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		r.ParseForm()
@@ -264,13 +309,25 @@ func main() {
 								overPaid = maxPrice - ticketPrice - ticketPriceOppose
 							}
 							apblogger.LogVar("overPaid", fmt.Sprintf("%v", overPaid))
-							ticketPriceAdjusted := ticketPrice + (overPaid / 2)
+							ticketPriceAdjusted := int64(ticketPrice + (overPaid / 2))
 							ticketPriceOpposeAdjusted := maxPrice - ticketPriceAdjusted
 							ticketToWrite := ticket
 							ticketToWriteOpposeTop := ticketOpposeTop
 
 							ticketToWrite.PriceAdjusted = fmt.Sprintf("%v", ticketPriceAdjusted)
 							ticketToWriteOpposeTop.PriceAdjusted = fmt.Sprintf("%v", ticketPriceOpposeAdjusted)
+
+							userTicket := user.GetUser(ticket.UserID)
+							userTicketBankroll := int64(userTicket.Bankroll)
+							userTicketOppose := user.GetUser(ticketOpposeTop.UserID)
+							userTicketOpposeBankroll := int64(userTicketOppose.Bankroll)
+							if userTicketBankroll < ticketPriceAdjusted {
+								respondWithError(w, "User doesn't have enough bankroll")
+							}
+							if userTicketOpposeBankroll < ticketPriceOpposeAdjusted {
+								respondWithError(w, "User 2 doesn't have enough bankroll")
+							}
+
 							apblogger.LogVar("ticketToWrite.Price >> NEW >>", fmt.Sprintf("%v", ticketToWrite.Price))
 							apblogger.LogVar("ticketToWriteOpposeTop.Price >> NEW >>", fmt.Sprintf("%v", ticketToWriteOpposeTop.Price))
 
@@ -281,9 +338,14 @@ func main() {
 							historyJSON, _ := json.Marshal(history)
 							timestamp := fmt.Sprintf("%v", time.Now().UnixNano())
 
-							response, err := bets.CreateBet(ticket.Ticket, timestamp, ticket.BetType, ticket.UserId, ticketOpposeTop.UserId, string(historyJSON))
+							response, err := bets.CreateBet(ticket.Ticket, timestamp, ticket.BetType, ticket.UserID, ticketOpposeTop.UserID, string(historyJSON))
 							if err != nil {
 								respondWithError(w, err.Error())
+							} else {
+								user.UpdateUser(ticket.UserID, fmt.Sprintf("%v", userTicketBankroll-ticketPriceAdjusted))
+								user.UpdateUser(ticketOpposeTop.UserID, fmt.Sprintf("%v", userTicketOpposeBankroll-ticketPriceOpposeAdjusted))
+								err = tickets.DeleteTicket(ticket.Ticket, ticket.PriceAndTime)
+								err = tickets.DeleteTicket(ticketOpposeTop.Ticket, ticketOpposeTop.PriceAndTime)
 							}
 							enc := json.NewEncoder(w)
 							enc.Encode(response)
