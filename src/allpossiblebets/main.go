@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"stats"
 	"strconv"
 	"tickets"
 	"time"
@@ -159,21 +160,15 @@ func main() {
 			enc := json.NewEncoder(w)
 			enc.Encode(response)
 		} else {
-			quantity, _ := strconv.ParseInt(r.FormValue("quantity"), 10, 0)
-			// TODO: don't hardcode the max Value
-			price, _ := strconv.ParseInt(r.FormValue("price"), 10, 0)
-			sortKeyPrice := 100 - price //need to sort by largest number and dynamodb sorts by smallest so have to take invese, should be max - price, hard coded in 100
-			for j := int(1); j <= int(quantity); j++ {
-				sortKey := fmt.Sprintf("%v_%v_%vOF%v", sortKeyPrice, time.Now().UnixNano(), j, quantity)
-				_, err := tickets.CreateTicket(sortKey, r.FormValue("ticket"), r.FormValue("betType"), r.FormValue("side"), r.FormValue("price"), r.FormValue("userId"))
-				if err != nil {
-					respondWithError(w, err.Error())
-					return
-				}
+			_, err := tickets.CreateTicketsFromFormData(r.FormValue("ticket"), r.FormValue("betType"), r.FormValue("side"), r.FormValue("price"), r.FormValue("userId"), r.FormValue("quantity"))
+
+			if err != nil {
+				respondWithError(w, err.Error())
+				return
 			}
-			enc := json.NewEncoder(w)
-			enc.Encode(APIErrorResponse{Error: false, Message: "Tickets Created"})
 		}
+		enc := json.NewEncoder(w)
+		enc.Encode(APIErrorResponse{Error: false, Message: "Tickets Created"})
 	})
 
 	http.HandleFunc("/getticket", func(w http.ResponseWriter, r *http.Request) {
@@ -367,6 +362,42 @@ func main() {
 			respondWithError(w, err.Error())
 		} else if len(response) == 0 {
 			respondWithError(w, "No bets found.")
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/updatestat", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+		response, err := stats.UpdateStat(r.FormValue("ticket"), r.FormValue("type"), r.FormValue("value"))
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/updatecounter", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		r.ParseForm()
+
+		response, err := stats.UpdateCounter(r.FormValue("ticket"), r.FormValue("type"), r.FormValue("amount"))
+		if err != nil {
+			respondWithError(w, err.Error())
+		} else {
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
+		}
+	})
+
+	http.HandleFunc("/getallstats", func(w http.ResponseWriter, r *http.Request) {
+		response := stats.GetAllStats()
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		if response == nil {
+			respondWithError(w, "No stats")
 		} else {
 			enc := json.NewEncoder(w)
 			enc.Encode(response)

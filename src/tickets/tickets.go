@@ -2,9 +2,13 @@ package tickets
 
 import (
 	"apblogger"
+	"bets"
 	"errors"
 	"fmt"
+	"stats"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -214,6 +218,29 @@ func GetAllTickets() (retTickets []TicketObj, err error) {
 		retTickets = append(retTickets, ticket)
 	}
 	return retTickets, nil
+}
+
+// CreateTicket creates a ticket
+func CreateTicketsFromFormData(ticketString string, betType string, side string, priceStr string, userID string, quantityStr string) (response CreateTicketResponse, err error) {
+	quantity, _ := strconv.ParseInt(quantityStr, 10, 0)
+	// TODO: don't hardcode the max Value
+	price, _ := strconv.ParseInt(priceStr, 10, 0)
+	sortKeyPrice := 100 - price //need to sort by largest number and dynamodb sorts by smallest so have to take invese, should be max - price, hard coded in 100
+	for j := int(1); j <= int(quantity); j++ {
+		sortKey := fmt.Sprintf("%v_%v_%vOF%v", sortKeyPrice, time.Now().UnixNano(), j, quantity)
+		_, err := CreateTicket(sortKey, ticketString, betType, side, priceStr, userID)
+		if err != nil {
+			return response, err
+		}
+		ticketWithoutSide := bets.GetTicketWithoutSide(ticketString)
+
+		apblogger.LogMessage("CreateTicketsFromFormData")
+		apblogger.LogVar("ticketWithoutSide", fmt.Sprintf("%v", ticketWithoutSide))
+		apblogger.LogVar("sortKey", fmt.Sprintf("%v", sortKey))
+
+		stats.UpdateStat(ticketWithoutSide, "openBet", priceStr)
+	}
+	return response, err
 }
 
 // CreateTicket creates a ticket
