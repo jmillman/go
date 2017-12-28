@@ -25,7 +25,7 @@ func GetAllStats() (retStats []StatsObj) {
 	)
 
 	svc := dynamodb.New(sess)
-	proj := expression.NamesList(expression.Name("ticket"), expression.Name("StatType"), expression.Name("statValue"))
+	proj := expression.NamesList(expression.Name("ticket"), expression.Name("statType"), expression.Name("statValue"))
 	expr, err := expression.NewBuilder().WithProjection(proj).Build()
 	params := &dynamodb.ScanInput{
 		ExpressionAttributeNames: expr.Names(),
