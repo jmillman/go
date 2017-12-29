@@ -1,7 +1,9 @@
 package stats
 
 import (
+	"apblogger"
 	"fmt"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -11,7 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 )
 
-type StatsObj struct {
+//StatObj represets stats table
+type StatObj struct {
 	Ticket    string `json:"ticket"`
 	StatType  string `json:"statType"`
 	StatValue string `json:"statValue"`
@@ -19,7 +22,8 @@ type StatsObj struct {
 
 var statsTableName = "stats2"
 
-func GetAllStats() (retStats []StatsObj) {
+//GetAllStats returns all stats from the database
+func GetAllStats() (retStats []StatObj) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -39,14 +43,48 @@ func GetAllStats() (retStats []StatsObj) {
 		return
 	}
 	for _, i := range result.Items {
-		stat := StatsObj{}
+		stat := StatObj{}
 		err = dynamodbattribute.UnmarshalMap(i, &stat)
 		retStats = append(retStats, stat)
 	}
 	return retStats
 }
 
-func GetStat(ticket string) (retStat StatsObj) {
+// func GetStat(ticket string) (retStat StatObj) {
+// 	sess, err := session.NewSession(&aws.Config{
+// 		Region: aws.String("us-east-2")},
+// 	)
+//
+// 	svc := dynamodb.New(sess)
+//
+// 	result, err := svc.GetItem(&dynamodb.GetItemInput{
+// 		TableName: aws.String(statsTableName),
+// 		Key: map[string]*dynamodb.AttributeValue{
+// 			"ticket": {
+// 				S: aws.String(ticket),
+// 			},
+// 		},
+// 	})
+//
+// 	if err != nil {
+// 		fmt.Println(err.Error())
+// 		return
+// 	}
+//
+// 	err = dynamodbattribute.UnmarshalMap(result.Item, &retStat)
+//
+// 	if err != nil {
+// 		panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
+// 	}
+// 	return retStat
+// }
+
+func getStatValue(ticket string, statType string) (statValue string) {
+	apblogger.LogMessage("getStatValue")
+
+	apblogger.LogVar("ticket", fmt.Sprintf("%v", ticket))
+	apblogger.LogVar("statType", fmt.Sprintf("%v", statType))
+
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -59,20 +97,31 @@ func GetStat(ticket string) (retStat StatsObj) {
 			"ticket": {
 				S: aws.String(ticket),
 			},
+			"statType": {
+				S: aws.String(statType),
+			},
 		},
 	})
 
+	apblogger.LogMessage("getStatValue 1")
 	if err != nil {
+		apblogger.LogMessage("getStatValue error 1")
 		fmt.Println(err.Error())
-		return
+		return ""
 	}
 
+	apblogger.LogMessage("getStatValue 3")
+	var retStat StatObj
 	err = dynamodbattribute.UnmarshalMap(result.Item, &retStat)
+
+	apblogger.LogMessage("getStatValue 4")
 
 	if err != nil {
 		panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
 	}
-	return retStat
+	apblogger.LogVar("retStat", fmt.Sprintf("%v", retStat))
+
+	return retStat.StatValue
 }
 
 // UpdateStatResponse object to be returned from the update stat call
@@ -80,6 +129,21 @@ type UpdateStatResponse struct {
 	Error   bool   `json:"error"`
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
+}
+
+// UpdateStatIfGreater updates a stat if greater than the old
+func UpdateStatIfGreater(ticket string, statType string, statValue string) (updateStatResponse UpdateStatResponse, err error) {
+	currentStatValue := getStatValue(ticket, statType)
+	oldVal, _ := strconv.ParseInt(currentStatValue, 10, 0)
+	newVal, _ := strconv.ParseInt(statValue, 10, 0)
+	apblogger.LogVar("oldVal", fmt.Sprintf("%v", oldVal))
+	apblogger.LogVar("newVal", fmt.Sprintf("%v", newVal))
+	if newVal > oldVal {
+		apblogger.LogMessage("if")
+		return UpdateStat(ticket, statType, statValue)
+	}
+	apblogger.LogMessage("not if")
+	return UpdateStatResponse{Error: false, Message: "Stat not greater and not updated"}, nil
 }
 
 // UpdateStat updates a stat in the database

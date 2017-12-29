@@ -1,0 +1,5 @@
+apblogger.LogVar("response", fmt.Sprintf("%v", response))
+
+
+apblogger.LogMessage("updateuser")
+apblogger.LogVar("response", fmt.Sprintf("%v", response))

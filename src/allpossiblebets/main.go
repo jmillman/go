@@ -1,16 +1,13 @@
 package main
 
 import (
-	"apblogger"
 	"bets"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"stats"
 	"strconv"
 	"tickets"
-	"time"
 	"user"
 )
 
@@ -82,12 +79,17 @@ func validateDeleteTicket(r *http.Request) (response tickets.CreateTicketRespons
 // APIErrorResponse is for sending error messages back to the client
 type APIErrorResponse struct {
 	Error   bool   `json:"error"`
-	Status  bool   `json:"status"`
 	Message string `json:"message"`
 }
 
 func respondWithError(w http.ResponseWriter, errorMessage string) {
 	response := APIErrorResponse{Error: true, Message: errorMessage}
+	enc := json.NewEncoder(w)
+	enc.Encode(response)
+}
+
+func respondWithMessage(w http.ResponseWriter, hasError bool, message string) {
+	response := APIErrorResponse{Error: hasError, Message: message}
 	enc := json.NewEncoder(w)
 	enc.Encode(response)
 }
@@ -134,10 +136,6 @@ func main() {
 	http.HandleFunc("/getuser", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		response := user.GetUser(r.FormValue("email"))
-
-		fmt.Printf("getuser_____________\n")
-		fmt.Printf("%v\n", response)
-
 		enc := json.NewEncoder(w)
 		enc.Encode(response)
 	})
@@ -164,11 +162,17 @@ func main() {
 
 			if err != nil {
 				respondWithError(w, err.Error())
-				return
+			} else {
+				// if the ticket is created, try to make a bet
+				_, err := bets.CreateBetFromTicketID(r.FormValue("ticket"), r.FormValue("priceAndTime"))
+				// if there is an error, the bet was not created
+				if err != nil {
+					respondWithMessage(w, false, "Ticket created")
+				} else {
+					respondWithMessage(w, false, "Bet Placed")
+				}
 			}
 		}
-		enc := json.NewEncoder(w)
-		enc.Encode(APIErrorResponse{Error: false, Message: "Tickets Created"})
 	})
 
 	http.HandleFunc("/getticket", func(w http.ResponseWriter, r *http.Request) {
@@ -201,8 +205,6 @@ func main() {
 	})
 
 	http.HandleFunc("/getticketcommon", func(w http.ResponseWriter, r *http.Request) {
-		apblogger.LogForm("getticketcommon", r)
-
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		r.ParseForm()
 		response, err := tickets.GetTicketCommon(r.FormValue("ticket"))
@@ -262,96 +264,23 @@ func main() {
 	http.HandleFunc("/updateuser", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		r.ParseForm()
-		response, err := user.UpdateUser(r.FormValue("email"), r.FormValue("bankroll"))
-		apblogger.LogMessage("updateuser")
-		apblogger.LogVar("response", fmt.Sprintf("%v", response))
+		_, err := user.UpdateUser(r.FormValue("email"), r.FormValue("bankroll"))
 		if err != nil {
 			respondWithError(w, err.Error())
 		} else {
-			respondWithError(w, "Update Worked")
+			respondWithMessage(w, false, "Update Worked")
 		}
 	})
 
-	http.HandleFunc("/getbet", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/createbet", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		r.ParseForm()
-		ticket, err := tickets.GetTicket(r.FormValue("ticket"), r.FormValue("priceAndTime"))
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		response, err := bets.CreateBetFromTicketID(r.FormValue("ticket"), r.FormValue("priceAndTime"))
 		if err != nil {
 			respondWithError(w, err.Error())
 		} else {
-			if ticket.Ticket != "" {
-				// ticket found
-				ticketsJSON, _ := json.Marshal(ticket)
-				ticketsOppose, err := tickets.GetTicketOppose(ticket.Ticket)
-				ticketOpposeTop := ticketsOppose[0]
-				if err != nil {
-					respondWithError(w, err.Error())
-				} else {
-					ticketPrice, err := strconv.ParseInt(ticket.Price, 10, 0)
-					ticketPriceOppose, err := strconv.ParseInt(ticketOpposeTop.Price, 10, 0)
-					maxPrice, err := strconv.ParseInt("100", 10, 0)
-					if err != nil {
-						respondWithError(w, err.Error())
-					}
-
-					if len(ticketsOppose) > 0 && (ticketPrice >= (100 - ticketPriceOppose)) {
-						if maxPrice-ticketPrice-ticketPriceOppose > 0 {
-							respondWithError(w, "The prices didn't equal")
-						} else {
-							overPaid, err := strconv.ParseInt("0", 10, 0)
-							if maxPrice != ticketPrice+ticketPriceOppose {
-								overPaid = maxPrice - ticketPrice - ticketPriceOppose
-							}
-							apblogger.LogVar("overPaid", fmt.Sprintf("%v", overPaid))
-							ticketPriceAdjusted := int64(ticketPrice + (overPaid / 2))
-							ticketPriceOpposeAdjusted := maxPrice - ticketPriceAdjusted
-							ticketToWrite := ticket
-							ticketToWriteOpposeTop := ticketOpposeTop
-
-							ticketToWrite.PriceAdjusted = fmt.Sprintf("%v", ticketPriceAdjusted)
-							ticketToWriteOpposeTop.PriceAdjusted = fmt.Sprintf("%v", ticketPriceOpposeAdjusted)
-
-							userTicket := user.GetUser(ticket.UserID)
-							userTicketBankroll := int64(userTicket.Bankroll)
-							userTicketOppose := user.GetUser(ticketOpposeTop.UserID)
-							userTicketOpposeBankroll := int64(userTicketOppose.Bankroll)
-							if userTicketBankroll < ticketPriceAdjusted {
-								respondWithError(w, "User doesn't have enough bankroll")
-							}
-							if userTicketOpposeBankroll < ticketPriceOpposeAdjusted {
-								respondWithError(w, "User 2 doesn't have enough bankroll")
-							}
-
-							apblogger.LogVar("ticketToWrite.Price >> NEW >>", fmt.Sprintf("%v", ticketToWrite.Price))
-							apblogger.LogVar("ticketToWriteOpposeTop.Price >> NEW >>", fmt.Sprintf("%v", ticketToWriteOpposeTop.Price))
-
-							apblogger.LogVar("ticketToWrite", fmt.Sprintf("%v", ticketToWrite))
-							apblogger.LogVar("ticketToWriteOpposeTop", fmt.Sprintf("%v", ticketToWriteOpposeTop))
-
-							history := BetResponse{Ticket: ticketToWrite, Oppose: ticketToWriteOpposeTop}
-							historyJSON, _ := json.Marshal(history)
-							timestamp := fmt.Sprintf("%v", time.Now().UnixNano())
-
-							response, err := bets.CreateBet(ticket.Ticket, timestamp, ticket.BetType, ticket.UserID, ticketOpposeTop.UserID, string(historyJSON))
-							if err != nil {
-								respondWithError(w, err.Error())
-							} else {
-								user.UpdateUser(ticket.UserID, fmt.Sprintf("%v", userTicketBankroll-ticketPriceAdjusted))
-								user.UpdateUser(ticketOpposeTop.UserID, fmt.Sprintf("%v", userTicketOpposeBankroll-ticketPriceOpposeAdjusted))
-								err = tickets.DeleteTicket(ticket.Ticket, ticket.PriceAndTime)
-								err = tickets.DeleteTicket(ticketOpposeTop.Ticket, ticketOpposeTop.PriceAndTime)
-							}
-							enc := json.NewEncoder(w)
-							enc.Encode(response)
-						}
-					} else {
-						apblogger.LogVar("Match Not Found", string(ticketsJSON))
-						respondWithError(w, "Match not found")
-					}
-				}
-			}
-
+			enc := json.NewEncoder(w)
+			enc.Encode(response)
 		}
 	})
 

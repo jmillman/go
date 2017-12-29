@@ -1,14 +1,13 @@
 package tickets
 
 import (
-	"apblogger"
-	"bets"
 	"errors"
 	"fmt"
 	"stats"
 	"strconv"
 	"strings"
 	"time"
+	"utils"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -57,11 +56,7 @@ func DeleteTicket(ticket string, priceAndTime string) (err error) {
 		},
 	}
 
-	result, err := svc.DeleteItem(input)
-
-	apblogger.LogMessage("_________delete____________")
-	apblogger.LogVar("result", fmt.Sprintf("%v\n", result))
-	apblogger.LogVar("err", fmt.Sprintf("%v\n", err))
+	_, err = svc.DeleteItem(input)
 
 	return err
 
@@ -220,7 +215,7 @@ func GetAllTickets() (retTickets []TicketObj, err error) {
 	return retTickets, nil
 }
 
-// CreateTicket creates a ticket
+// CreateTicketsFromFormData creates a ticket
 func CreateTicketsFromFormData(ticketString string, betType string, side string, priceStr string, userID string, quantityStr string) (response CreateTicketResponse, err error) {
 	quantity, _ := strconv.ParseInt(quantityStr, 10, 0)
 	// TODO: don't hardcode the max Value
@@ -228,23 +223,16 @@ func CreateTicketsFromFormData(ticketString string, betType string, side string,
 	sortKeyPrice := 100 - price //need to sort by largest number and dynamodb sorts by smallest so have to take invese, should be max - price, hard coded in 100
 	for j := int(1); j <= int(quantity); j++ {
 		sortKey := fmt.Sprintf("%v_%v_%vOF%v", sortKeyPrice, time.Now().UnixNano(), j, quantity)
-		_, err := CreateTicket(sortKey, ticketString, betType, side, priceStr, userID)
+		_, err = createTicket(sortKey, ticketString, betType, side, priceStr, userID)
 		if err != nil {
 			return response, err
 		}
-		ticketWithoutSide := bets.GetTicketWithoutSide(ticketString)
-
-		apblogger.LogMessage("CreateTicketsFromFormData")
-		apblogger.LogVar("ticketWithoutSide", fmt.Sprintf("%v", ticketWithoutSide))
-		apblogger.LogVar("sortKey", fmt.Sprintf("%v", sortKey))
-
-		stats.UpdateStat(ticketWithoutSide, "openBet", priceStr)
 	}
 	return response, err
 }
 
-// CreateTicket creates a ticket
-func CreateTicket(priceAndTime string, ticketString string, betType string, side string, price string, userID string) (response CreateTicketResponse, err error) {
+// createTicket creates a ticket
+func createTicket(priceAndTime string, ticketString string, betType string, side string, price string, userID string) (response CreateTicketResponse, err error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -262,8 +250,14 @@ func CreateTicket(priceAndTime string, ticketString string, betType string, side
 
 	if err != nil {
 		return response, err
+	} else {
+		// ticket created
+		ticketWithoutSide := utils.GetTicketWithoutSide(ticketString)
+
+		stats.UpdateStatIfGreater(ticketWithoutSide, side, price)
+
+		response.Status = true
+		response.Message = ticketString
+		return response, nil
 	}
-	response.Status = true
-	response.Message = ticketString
-	return response, nil
 }
