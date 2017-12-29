@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"apblogger"
 	"fmt"
 	"strconv"
 
@@ -49,34 +50,32 @@ func GetAllStats() (retStats []StatObj) {
 	return retStats
 }
 
-// func GetStat(ticket string) (retStat StatObj) {
-// 	sess, err := session.NewSession(&aws.Config{
-// 		Region: aws.String("us-east-2")},
-// 	)
-//
-// 	svc := dynamodb.New(sess)
-//
-// 	result, err := svc.GetItem(&dynamodb.GetItemInput{
-// 		TableName: aws.String(statsTableName),
-// 		Key: map[string]*dynamodb.AttributeValue{
-// 			"ticket": {
-// 				S: aws.String(ticket),
-// 			},
-// 		},
-// 	})
-//
-// 	if err != nil {
-// 		fmt.Println(err.Error())
-// 		return
-// 	}
-//
-// 	err = dynamodbattribute.UnmarshalMap(result.Item, &retStat)
-//
-// 	if err != nil {
-// 		panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
-// 	}
-// 	return retStat
-// }
+func DeleteStat(ticket string, statType string) (err error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-2")},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	svc := dynamodb.New(sess)
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String(statsTableName),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ticket": {
+				S: aws.String(ticket),
+			},
+			"statType": {
+				S: aws.String(statType),
+			},
+		},
+	}
+
+	_, err = svc.DeleteItem(input)
+
+	return err
+}
 
 func getStatValue(ticket string, statType string) (statValue string) {
 	sess, err := session.NewSession(&aws.Config{
@@ -131,6 +130,7 @@ func UpdateStatIfGreater(ticket string, statType string, statValue string) (upda
 
 // UpdateStat updates a stat in the database
 func UpdateStat(ticket string, statType string, statValue string) (updateStatResponse UpdateStatResponse, err error) {
+	apblogger.LogVar("UpdateStat", fmt.Sprintf("t=%v st=%v sv=%v", ticket, statType, statValue))
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -184,6 +184,10 @@ func UpdateStat(ticket string, statType string, statValue string) (updateStatRes
 		}
 	}
 	return updateStatResponse, err
+}
+
+func UpdateHomeAndAway(ticket string) {
+
 }
 
 // UpdateCounter updates a stat in the database

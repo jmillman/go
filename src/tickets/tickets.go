@@ -63,14 +63,6 @@ func DeleteTicket(ticket string, priceAndTime string) (err error) {
 	_, err = svc.DeleteItem(input)
 
 	return err
-
-	// err = dynamodbattribute.UnmarshalMap(result.Item, &retTicket)
-	//
-	// if err != nil {
-	// 	return retTicket, err
-	// 	// panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
-	// }
-	// return retTicket, nil
 }
 
 // GetTicket gets the ticket from the db
@@ -427,6 +419,28 @@ func GetAllBets() (retBets []BetObj, err error) {
 	return retBets, nil
 }
 
+func UpdateHomeAndAwayStats(ticket string) {
+	apblogger.LogMessage("UpdateHomeAndAwayStats ticket=" + ticket)
+	time.Sleep(5 * time.Second)
+	homeTickets, _ := GetTicketCommon(ticket + "_home")
+	apblogger.LogVar("homeTickets", fmt.Sprintf("%v", homeTickets))
+	if len(homeTickets) > 0 {
+		stats.UpdateStat(ticket, "home", homeTickets[0].Price)
+	} else {
+		apblogger.LogMessage("no home set to 0")
+		stats.DeleteStat(ticket, "home")
+	}
+	awayTickets, _ := GetTicketCommon(ticket + "_away")
+	apblogger.LogVar("awayTickets", fmt.Sprintf("%v", awayTickets))
+	if len(awayTickets) > 0 {
+		apblogger.LogMessage("no away set to 0")
+		stats.UpdateStat(ticket, "away", awayTickets[0].Price)
+	} else {
+		apblogger.LogMessage("no away set to 0")
+		stats.DeleteStat(ticket, "away")
+	}
+}
+
 func CreateBet(ticket string, timeStamp string, betType string, homeUserId string, awayUserId string, history string) (err error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
@@ -448,6 +462,7 @@ func CreateBet(ticket string, timeStamp string, betType string, homeUserId strin
 	if err != nil {
 		return err
 	} else {
+		go UpdateHomeAndAwayStats(ticket)
 		stats.UpdateCounter(ticket, "bets", "1")
 		return nil
 	}
