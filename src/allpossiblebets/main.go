@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bets"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -163,14 +162,7 @@ func main() {
 			if err != nil {
 				respondWithError(w, err.Error())
 			} else {
-				// if the ticket is created, try to make a bet
-				_, err := bets.CreateBetFromTicketID(r.FormValue("ticket"), r.FormValue("priceAndTime"))
-				// if there is an error, the bet was not created
-				if err != nil {
-					respondWithMessage(w, false, "Ticket created")
-				} else {
-					respondWithMessage(w, false, "Bet Placed")
-				}
+				respondWithMessage(w, false, "Ticket created")
 			}
 		}
 	})
@@ -275,7 +267,7 @@ func main() {
 	http.HandleFunc("/createbet", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		r.ParseForm()
-		response, err := bets.CreateBetFromTicketID(r.FormValue("ticket"), r.FormValue("priceAndTime"))
+		response, err := tickets.CreateBetFromTicketID(r.FormValue("ticket"), r.FormValue("priceAndTime"))
 		if err != nil {
 			respondWithError(w, err.Error())
 		} else {
@@ -286,7 +278,7 @@ func main() {
 
 	http.HandleFunc("/getallbets", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		response, err := bets.GetAllBets()
+		response, err := tickets.GetAllBets()
 		if err != nil {
 			respondWithError(w, err.Error())
 		} else if len(response) == 0 {

@@ -1,7 +1,6 @@
 package stats
 
 import (
-	"apblogger"
 	"fmt"
 	"strconv"
 
@@ -80,11 +79,6 @@ func GetAllStats() (retStats []StatObj) {
 // }
 
 func getStatValue(ticket string, statType string) (statValue string) {
-	apblogger.LogMessage("getStatValue")
-
-	apblogger.LogVar("ticket", fmt.Sprintf("%v", ticket))
-	apblogger.LogVar("statType", fmt.Sprintf("%v", statType))
-
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String("us-east-2")},
 	)
@@ -103,24 +97,17 @@ func getStatValue(ticket string, statType string) (statValue string) {
 		},
 	})
 
-	apblogger.LogMessage("getStatValue 1")
 	if err != nil {
-		apblogger.LogMessage("getStatValue error 1")
 		fmt.Println(err.Error())
 		return ""
 	}
 
-	apblogger.LogMessage("getStatValue 3")
 	var retStat StatObj
 	err = dynamodbattribute.UnmarshalMap(result.Item, &retStat)
-
-	apblogger.LogMessage("getStatValue 4")
 
 	if err != nil {
 		panic(fmt.Sprintf("Failed to unmarshal Record, %v", err))
 	}
-	apblogger.LogVar("retStat", fmt.Sprintf("%v", retStat))
-
 	return retStat.StatValue
 }
 
@@ -136,13 +123,9 @@ func UpdateStatIfGreater(ticket string, statType string, statValue string) (upda
 	currentStatValue := getStatValue(ticket, statType)
 	oldVal, _ := strconv.ParseInt(currentStatValue, 10, 0)
 	newVal, _ := strconv.ParseInt(statValue, 10, 0)
-	apblogger.LogVar("oldVal", fmt.Sprintf("%v", oldVal))
-	apblogger.LogVar("newVal", fmt.Sprintf("%v", newVal))
 	if newVal > oldVal {
-		apblogger.LogMessage("if")
 		return UpdateStat(ticket, statType, statValue)
 	}
-	apblogger.LogMessage("not if")
 	return UpdateStatResponse{Error: false, Message: "Stat not greater and not updated"}, nil
 }
 

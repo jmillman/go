@@ -1,6 +1,10 @@
 package tickets
 
 import (
+	"apblogger"
+	"encoding/json"
+	"user"
+	// "bets"
 	"errors"
 	"fmt"
 	"stats"
@@ -215,6 +219,14 @@ func GetAllTickets() (retTickets []TicketObj, err error) {
 	return retTickets, nil
 }
 
+// if the ticket is created, try to make a bet
+func createBetFromTicketInNewRoutine(ticket string, key string) {
+	apblogger.LogMessage("createBetFromTicketInNewRoutine Enter ticket=" + ticket + " key=" + key)
+	time.Sleep(5 * time.Second)
+	apblogger.LogMessage("createBetFromTicketInNewRoutine Post Sleep")
+	CreateBetFromTicketID(ticket, key)
+}
+
 // CreateTicketsFromFormData creates a ticket
 func CreateTicketsFromFormData(ticketString string, betType string, side string, priceStr string, userID string, quantityStr string) (response CreateTicketResponse, err error) {
 	quantity, _ := strconv.ParseInt(quantityStr, 10, 0)
@@ -227,6 +239,7 @@ func CreateTicketsFromFormData(ticketString string, betType string, side string,
 		if err != nil {
 			return response, err
 		}
+		go createBetFromTicketInNewRoutine(ticketString, sortKey)
 	}
 	return response, err
 }
@@ -259,5 +272,183 @@ func createTicket(priceAndTime string, ticketString string, betType string, side
 		response.Status = true
 		response.Message = ticketString
 		return response, nil
+	}
+}
+
+type CreateBetResponse struct {
+	Status  bool   `json:"status"`
+	Message string `json:"message"`
+}
+
+type BetObj struct {
+	Ticket     string `json:"ticket"`
+	TimeStamp  string `json:"timestamp"`
+	BetType    string `json:"betType"`
+	HomeUserId string `json:"homeUserId"`
+	AwayUserId string `json:"awayUserId"`
+	History    string `json:"history"`
+}
+
+type BetResponse struct {
+	Ticket  TicketObj `json:"ticket"`
+	Oppose  TicketObj `json:"opposet"`
+	Status  bool      `json:"status"`
+	Message string    `json:"message"`
+}
+
+func CreateBetFromTicketID(ticketStr string, sortKey string) (wasCreated bool, err error) {
+	apblogger.LogMessage("CreateBetFromTicketID")
+	ticket, err := GetTicket(ticketStr, sortKey)
+	if err != nil {
+		apblogger.LogVar("err", fmt.Sprintf("%v", err))
+		return false, err
+	} else {
+		if ticket.Ticket == "" {
+			return false, errors.New("Ticket can't be found")
+		} else {
+			apblogger.LogMessage("Found Ticket")
+			ticketsOppose, err := GetTicketOppose(ticket.Ticket)
+			if err != nil {
+				return false, err
+			}
+			if len(ticketsOppose) == 0 {
+				apblogger.LogMessage("No Opposing Ticket")
+				return false, errors.New("No Opposing Ticket")
+			} else {
+				apblogger.LogMessage("Found potential opposition")
+				ticketOpposeTop := ticketsOppose[0]
+				apblogger.LogVar("ticketOpposeTop", fmt.Sprintf("%v", ticketOpposeTop))
+				ticketPrice, err := strconv.ParseInt(ticket.Price, 10, 0)
+				apblogger.LogVar("ticketPrice", fmt.Sprintf("%v", ticketPrice))
+				ticketPriceOppose, err := strconv.ParseInt(ticketOpposeTop.Price, 10, 0)
+				apblogger.LogVar("ticketPriceOppose", fmt.Sprintf("%v", ticketPriceOppose))
+				maxPrice, err := strconv.ParseInt("100", 10, 0)
+				if err != nil {
+					apblogger.LogVar("err", fmt.Sprintf("%v", err))
+					return false, err
+				}
+
+				if maxPrice-ticketPrice-ticketPriceOppose > 0 {
+					apblogger.LogMessage("The prices didn't equal")
+					return false, errors.New("The prices didn't equal")
+				} else {
+					apblogger.LogMessage("Looking good")
+					overPaid, err := strconv.ParseInt("0", 10, 0)
+					if maxPrice != ticketPrice+ticketPriceOppose {
+						overPaid = maxPrice - ticketPrice - ticketPriceOppose
+					}
+					ticketPriceAdjusted := int64(ticketPrice + (overPaid / 2))
+					ticketPriceOpposeAdjusted := maxPrice - ticketPriceAdjusted
+					ticketToWrite := ticket
+					ticketToWriteOpposeTop := ticketOpposeTop
+
+					ticketToWrite.PriceAdjusted = fmt.Sprintf("%v", ticketPriceAdjusted)
+					ticketToWriteOpposeTop.PriceAdjusted = fmt.Sprintf("%v", ticketPriceOpposeAdjusted)
+
+					userTicket := user.GetUser(ticket.UserID)
+					userTicketBankroll := int64(userTicket.Bankroll)
+					userTicketOppose := user.GetUser(ticketOpposeTop.UserID)
+					userTicketOpposeBankroll := int64(userTicketOppose.Bankroll)
+					if userTicketBankroll < ticketPriceAdjusted {
+						return false, errors.New("User doesn't have enough bankroll")
+					}
+					if userTicketOpposeBankroll < ticketPriceOpposeAdjusted {
+						return false, errors.New("User 2 doesn't have enough bankroll")
+					}
+
+					history := BetResponse{Ticket: ticketToWrite, Oppose: ticketToWriteOpposeTop}
+					historyJSON, _ := json.Marshal(history)
+					timestamp := fmt.Sprintf("%v", time.Now().UnixNano())
+
+					apblogger.LogMessage("Abount to create Bet " + ticket.Ticket + ": " + ticket.UserID + " v.s.v" + ticketOpposeTop.UserID)
+					err = CreateBet(ticket.Ticket, timestamp, ticket.BetType, ticket.UserID, ticketOpposeTop.UserID, string(historyJSON))
+					if err != nil {
+						return false, err
+					} else {
+
+						user.UpdateUser(ticket.UserID, fmt.Sprintf("%v", userTicketBankroll-ticketPriceAdjusted))
+						user.UpdateUser(ticketOpposeTop.UserID, fmt.Sprintf("%v", userTicketOpposeBankroll-ticketPriceOpposeAdjusted))
+
+						apblogger.LogMessage("Abount to delete ticket1")
+						err = DeleteTicket(ticket.Ticket, ticket.PriceAndTime)
+						apblogger.LogVar("del ticket 1 err", fmt.Sprintf("%v", err))
+
+						apblogger.LogMessage("Abount to delete ticket2")
+						err = DeleteTicket(ticketOpposeTop.Ticket, ticketOpposeTop.PriceAndTime)
+						apblogger.LogVar("del ticket 2 err", fmt.Sprintf("%v", err))
+
+						return true, nil
+					}
+				}
+
+			}
+		}
+	}
+}
+
+func GetAllBets() (retBets []BetObj, err error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-2")},
+	)
+
+	if err != nil {
+		return retBets, err
+	}
+
+	svc := dynamodb.New(sess)
+	proj := expression.NamesList(expression.Name("ticket"), expression.Name("betType"), expression.Name("timestamp"), expression.Name("homeUserId"), expression.Name("awayUserId"), expression.Name("history"))
+
+	expr, err := expression.NewBuilder().WithProjection(proj).Build()
+
+	if err != nil {
+		return retBets, err
+	}
+
+	params := &dynamodb.ScanInput{
+		ExpressionAttributeNames: expr.Names(),
+		ProjectionExpression:     expr.Projection(),
+		TableName:                aws.String("bets"),
+	}
+
+	result, err := svc.Scan(params)
+	if err != nil {
+		return retBets, err
+	}
+
+	for _, i := range result.Items {
+		bet := BetObj{}
+		err = dynamodbattribute.UnmarshalMap(i, &bet)
+
+		if err != nil {
+			return retBets, err
+		}
+		retBets = append(retBets, bet)
+	}
+	return retBets, nil
+}
+
+func CreateBet(ticket string, timeStamp string, betType string, homeUserId string, awayUserId string, history string) (err error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-east-2")},
+	)
+	if err != nil {
+		return err
+	}
+	svc := dynamodb.New(sess)
+	ticket = utils.GetTicketWithoutSide(ticket)
+	bet := &BetObj{Ticket: ticket, TimeStamp: timeStamp, BetType: betType, HomeUserId: homeUserId, AwayUserId: awayUserId, History: history}
+
+	atts, err := dynamodbattribute.MarshalMap(bet)
+
+	if err != nil {
+		return err
+	}
+	_, err = svc.PutItem(&dynamodb.PutItemInput{Item: atts, TableName: aws.String("bets")})
+
+	if err != nil {
+		return err
+	} else {
+		stats.UpdateCounter(ticket, "bets", "1")
+		return nil
 	}
 }
